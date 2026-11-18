@@ -1,0 +1,9 @@
+name = "tg-webproxy"
+main = "telegram_webproxy.js"
+compatibility_date = "2026-03-01"
+workers_dev = true
+
+# 换成你自己的子域和 zone，例如 tg.example.com / example.com
+routes = [
+  { pattern = "tg.example.com/*", zone_name = "example.com" }
+]
