@@ -90,7 +90,12 @@ HOST=tg.example.com SECRET=<32hex> N=14 node scripts/load_probe.mjs
    - 重复 sid / 未知 lane / 非法帧只记诊断，不炸会话
 2. **`/api/v1/diag` 诊断端点**。页面在 `fail()` 时上报 `e`（原因）、`q`（队列字节）、`i`（帧数）、`n`（lane 数），
    Worker 侧 `console.log('DIAG ...')`，`wrangler tail` 里直接可见。
-3. **lane 关闭日志**：每条 lane 结束时打印 `LN close sid=<id> code=<close code> ms=<存活> up=<上行> dn=<下行>`，
+4. **session 续签（关键修复）**。上游的 session token TTL 是 **5 分钟**，桥接页只在加载时建一次 session。
+   超过 5 分钟后客户端再开新 lane 就会被 `/api/v1/ws` 以 `404` 拒绝（`LN deny proto ...`），
+   页面重试失败后判定代理挂掉 → 整个 Telegram 转圈重连，表现为**每 5 分钟固定断一次**，和点不点图片无关。
+   现在：Worker 侧 TTL 提到 60 分钟，桥接页每 4 分钟静默续签（`POST /api/v1/session` 换新 token，
+   旧 token 主动 `DELETE`），新开的 lane 立即使用新 token。
+5. **lane 关闭日志**：每条 lane 结束时打印 `LN close sid=<id> code=<close code> ms=<存活> up=<上行> dn=<下行>`，
    用来区分 `1000`（对端正常关）和 `1005`（没收到关闭帧，被中间层掐断）。
 
 ### 观察到的现象与判读
@@ -99,6 +104,8 @@ HOST=tg.example.com SECRET=<32hex> N=14 node scripts/load_probe.mjs
 wrangler tail <worker-name> --format json | jq -c 'select(.logs)'
 ```
 
+- `LN deny proto ... parts=3 kind=tproxy-lane-v1 id=N sid=N tok=43`：token 校验失败（过期或被轮换），
+  检查 session 续签是否生效
 - `code=1000` 且存活 ~16s / ~125s：客户端自己的连接轮换，正常
 - 同一时刻多条 lane 一起 `code=1005`，且 Worker 侧 `outcome=ok`、`cpuTime` 很小：不是 Worker 抛错，
   是这批连接所在的执行环境被回收，或客户端到 CF 的链路瞬断；客户端会自动重连
